@@ -1,3 +1,4 @@
+
 /**
  *  Kettle_temp
  *
@@ -11,6 +12,15 @@
  *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
+ *
+ * 1) Capability дает стандартный набор аттрибутов? Какой? Мне нужно: switch, energy потреблено, кол-во запусков, время работы)
+ *    1.1) Все остальные задавать как кастомные? Или можно ничего не делать?
+ * 2) Какие стандартные METHODS возможны? Какие обязательны? В какой ситуации возникают?
+ *	2.1) что уже знаю:
+ * 	- Parse вызывается, когда отрабатывает runCmd уже сразу с текстом ответа
+ *  - Updated вызвается, когда нажимаешь "сохранить" в конфигурации
+ *  - Installed точно когда-то вызывается - но пока не ясно в каких случаях:)
+ * 3) Как работает sendEvent?
  */
 metadata {
 	definition (name: "KettleRedmondDTH", namespace: "BorisE", author: "Boris Emchenko") {
@@ -25,17 +35,20 @@ metadata {
 	preferences {
 		input("DeviceIP", "string", title:"Device IP Address", description: "Please enter your device's IP Address", required: true, displayDuringSetup: true)
 		input("DevicePort", "string", title:"Device Port", description: "Please enter port 80 or your device's Port", required: true, displayDuringSetup: true)
-		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 0.1a", description: "By Boris Emchenko"
+		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 0.2a", description: "By Boris Emchenko"
     }
     
 	simulator {
 		// TODO: define status and reply messages here
 	}
 
-	tiles(scale: 2) {
- 		standardTile("switch", "device.switch", width: 6, height: 4, canChangeIcon: true) {
+	tiles(scale: 2) 
+	{
+ 		standardTile("switch", "device.switch", width: 6, height: 4, decoration: "flat", canChangeIcon: true) {
 			state "off", label:'${name}', action:"switch.on", icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#ffffff"
-    		state "on", label:'${name}', action:"switch.off", icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#00a0dc"            
+    		state "on", label:'${name}', action:"switch.off", icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#00a0dc"
+			state "turningOn", label:'Turning on', icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#00a0dc", nextState: "turningOff"
+			state "turningOff", label:'Turning off', icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#ffffff", nextState: "turningOn"
             }
     	
         valueTile("temperature", "device.temperature", inactiveLabel: false, width: 2, height: 2) {
@@ -78,8 +91,11 @@ metadata {
 
 def installed() {
 	log.debug "installing..."
+
+	//set defaule values
 	sendEvent(name: "switch", value: "off")
     sendEvent(name: "temperature", value: 0)
+	sendEvent(name: "mode", value: "00")
     sendEvent(name: "energy", value: 0)
     sendEvent(name: "duration", value: 0)
     sendEvent(name: "times", value: 0)
@@ -123,10 +139,10 @@ def refresh() {
 def updated(){
 	log.debug "Updated method call"
 
-	log.degug("Hub address: " + device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP"))
-    log.debug("Device IP ${DeviceIP}")
+	log.info("Hub address: " + device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP"))
+    log.info("Device IP ${DeviceIP}:${DevicePort}")
 
-	runCmd("test")
+	runCmd("update")
 }
 
 
@@ -138,15 +154,14 @@ def runCmd(String varCommand) {
 	def hosthex = convertIPtoHex(host).toUpperCase()
 	def porthex = convertPortToHex(DevicePort).toUpperCase()
 	device.deviceNetworkId = "$hosthex:$porthex"
+	log.debug "The device id configured is: $device.deviceNetworkId"
+	
 	//def userpassascii = "${HTTPUser}:${HTTPPassword}"
 	//def userpass = "Basic " + userpassascii.encodeAsBase64().toString()
-	def DevicePostGet = "POST"
-	log.debug "The device id configured is: $device.deviceNetworkId"
 
 	//def path = DevicePath
 	def path = "/index.php?cmd=4"
 	log.debug "path is: $path"
-	log.debug "Uses which method: $DevicePostGet"
 	def body = ""//varCommand
 	log.debug "body is: $body"
 
@@ -155,17 +170,6 @@ def runCmd(String varCommand) {
 	headers.put("Content-Type", "application/x-www-form-urlencoded")
 	log.debug "The Header is $headers"
 	def method = "GET"
-	try {
-		if (DevicePostGet.toUpperCase() == "GET") {
-			method = "GET"
-			}
-		}
-	catch (Exception e) {
-		settings.DevicePostGet = "POST"
-		log.debug e
-		log.debug "You must not have set the preference for the DevicePOSTGET option"
-	}
-	log.debug "The method is $method"
 
 	try {
 		def hubAction = new physicalgraph.device.HubAction(
@@ -211,10 +215,9 @@ private def parseEventMessage(String description) {
 
 // parse events into attributes
 def parse(String description) {
-	log.debug "Parsing '${description}'"
+	log.debug "Parsing message: '${description}'"
     
     def parsedEvent= parseEventMessage( description)
-
 	log.debug "AfterParsingEventMessage '${parsedEvent}'"
 
     def headerString = new String(parsedEvent.headers.decodeBase64())
@@ -226,21 +229,40 @@ def parse(String description) {
     def json = new groovy.json.JsonSlurper().parseText( bodyString)
 	log.trace json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
     
-    log.info "temp: ${json.temp}"
     
+    if (json.status)
+    {
+	    if (json.mode == "00") {
+			sendEvent(name: "switch", value: "off")
+		}elseif(json.mode == "02")	{
+			sendEvent(name: "switch", value: "on")
+		}else{
+			sendEvent(name: "switch", value: "turningOn")
+		}
+   	}
     if (json.temp)
     {
 	    sendEvent(name: "temperature", value: json.temp)
    	}
+    if (json.mode)
+    {
+	    if (json.mode == "00") {
+			sendEvent(name: "mode", value: "off")
+		}elseif(json.mode == "02")	{
+			sendEvent(name: "switch", value: "on")
+		}else{
+			sendEvent(name: "switch", value: "turningOn")
+		}
+   	}
     if (json.watts)
     {
-	    sendEvent(name: "energy", value: json.watts)
+	    sendEvent(name: "energy", value: json.watts/1000.0)
    	}
     if (json.alltime)
     {
 	    sendEvent(name: "duration", value: json.alltime)
    	}
-    if (json.alltime)
+    if (json.times)
     {
 	    sendEvent(name: "times", value: json.times)
    	}
