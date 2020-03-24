@@ -21,6 +21,12 @@
  *  - Updated вызвается, когда нажимаешь "сохранить" в конфигурации
  *  - Installed точно когда-то вызывается - но пока не ясно в каких случаях:)
  * 3) Как работает sendEvent?
+ *
+ * ToDo:
+ * 1) Проверка, что чайник отключился (рефреш)
+ * 2) Периодический рефреш вообще
+ * 3) Промежуточный статус switch
+ *
  */
 metadata {
 	definition (name: "KettleRedmondDTH", namespace: "BorisE", author: "Boris Emchenko") {
@@ -35,7 +41,7 @@ metadata {
 	preferences {
 		input("DeviceIP", "string", title:"Device IP Address", description: "Please enter your device's IP Address", required: true, displayDuringSetup: true)
 		input("DevicePort", "string", title:"Device Port", description: "Please enter port 80 or your device's Port", required: true, displayDuringSetup: true)
-		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 0.2a", description: "By Boris Emchenko"
+		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 1.01", description: "By Boris Emchenko"
     }
     
 	simulator {
@@ -47,8 +53,8 @@ metadata {
  		standardTile("switch", "device.switch", width: 6, height: 4, decoration: "flat", canChangeIcon: true) {
 			state "off", label:'${name}', action:"switch.on", icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#ffffff"
     		state "on", label:'${name}', action:"switch.off", icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#00a0dc"
-			state "turningOn", label:'Turning on', icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#00a0dc", nextState: "turningOff"
-			state "turningOff", label:'Turning off', icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#ffffff", nextState: "turningOn"
+			state "turningOn", label:'Turning on', icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#00a0dc", nextState: "on"
+			state "turningOff", label:'Turning off', icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/appliances3-icn%402x.png", backgroundColor:"#ffffff", nextState: "off"
             }
     	
         valueTile("temperature", "device.temperature", inactiveLabel: false, width: 2, height: 2) {
@@ -72,20 +78,20 @@ metadata {
 			state "default", action:"refresh.refresh", icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/refresh-icon%402x.png"
 		}
 
-		valueTile("energy", "device.energy", decoration: "flat", width: 2, height: 2) {
+		valueTile("power", "device.power", decoration: "flat", width: 2, height: 2) {
 			state "default", label:'${currentValue} kWh'
 		}
 		valueTile("duration", "device.duration", decoration: "flat", width: 2, height: 2) {
-			state "default", label:'${currentValue} min'
+			state "default", label:'${currentValue} hours'
 		}
 		valueTile("times", "device.times", decoration: "flat", width: 2, height: 2) {
-			state "default", label:'${currentValue}'
+			state "default", label:'${currentValue} times'
 		}
 
   		// the "switch" tile will appear in the Things view
         main("switch")
         
-        details(["switch", "temperature", "mode", "refresh", "energy", "duration", "times"])
+        details(["switch", "temperature", "mode", "refresh", "power", "duration", "times"])
 	}
 }
 
@@ -95,8 +101,8 @@ def installed() {
 	//set defaule values
 	sendEvent(name: "switch", value: "off")
     sendEvent(name: "temperature", value: 0)
-	sendEvent(name: "mode", value: "00")
-    sendEvent(name: "energy", value: 0)
+	sendEvent(name: "mode", value: "none")
+    sendEvent(name: "power", value: 0)
     sendEvent(name: "duration", value: 0)
     sendEvent(name: "times", value: 0)
 }
@@ -104,16 +110,24 @@ def installed() {
 
 def on() {
 	log.debug "on()"
+    
+	sendEvent(name: "switch", value: "turningOn")
+    
+    runCmd("on")
     //sendEvent(name: "temperature", value: 95)
-    //sendEvent(name: "energy", value: 2001)
-	sendEvent(name: "switch", value: "on")
+    //sendEvent(name: "power", value: 2001)
+	//sendEvent(name: "switch", value: "on")
 }
 
 def off() {
 	log.debug "off()"
+ 	
+    sendEvent(name: "switch", value: "turningOff")
+ 
+ 	runCmd("off")
     //sendEvent(name: "temperature", value: 31)
-    //sendEvent(name: "energy", value: 1001)
-	sendEvent(name: "switch", value: "off")
+    //sendEvent(name: "power", value: 1001)
+	//sendEvent(name: "switch", value: "off")
 }
 
 def refresh() {
@@ -149,6 +163,17 @@ def updated(){
 def runCmd(String varCommand) {
 	
     log.info("Running command [${varCommand}]")
+    def cmdPath = ""
+	if (varCommand == "update") {
+    	cmdPath = "4"
+    } else if (varCommand == "on") {
+    	cmdPath = "1"
+    } else if (varCommand == "off") {
+    	cmdPath = "2"
+    }
+    def randNum = new Random().nextInt(65000) + 1
+    def sid = "&sid=" + randNum
+    log.info (sid)
 
 	def host = DeviceIP
 	def hosthex = convertIPtoHex(host).toUpperCase()
@@ -160,7 +185,7 @@ def runCmd(String varCommand) {
 	//def userpass = "Basic " + userpassascii.encodeAsBase64().toString()
 
 	//def path = DevicePath
-	def path = "/index.php?cmd=4"
+	def path = "/index.php?cmd="+cmdPath+sid
 	log.debug "path is: $path"
 	def body = ""//varCommand
 	log.debug "body is: $body"
@@ -218,7 +243,7 @@ def parse(String description) {
 	log.debug "Parsing message: '${description}'"
     
     def parsedEvent= parseEventMessage( description)
-	log.debug "AfterParsingEventMessage '${parsedEvent}'"
+	//log.debug "AfterParsingEventMessage '${parsedEvent}'"
 
     def headerString = new String(parsedEvent.headers.decodeBase64())
     log.debug "Response header '${headerString}'"
@@ -230,11 +255,11 @@ def parse(String description) {
 	log.trace json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
     
     
-    if (json.status)
+    if (json.status) //#may be '00' - OFF or '02' - ON
     {
-	    if (json.mode == "00") {
+	    if (json.status == "00") {
 			sendEvent(name: "switch", value: "off")
-		}elseif(json.mode == "02")	{
+		}else if(json.status == "02")	{
 			sendEvent(name: "switch", value: "on")
 		}else{
 			sendEvent(name: "switch", value: "turningOn")
@@ -244,19 +269,21 @@ def parse(String description) {
     {
 	    sendEvent(name: "temperature", value: json.temp)
    	}
-    if (json.mode)
+    if (json.mode) //# '00' - boil, '01' - heat to temp, '03' - backlight
     {
 	    if (json.mode == "00") {
-			sendEvent(name: "mode", value: "off")
-		}elseif(json.mode == "02")	{
-			sendEvent(name: "switch", value: "on")
+			sendEvent(name: "mode", value: "boil")
+		}else if(json.mode == "01")	{
+			sendEvent(name: "mode", value: "heat")
+		}else if(json.mode == "03")	{
+			sendEvent(name: "mode", value: "backlight")
 		}else{
-			sendEvent(name: "switch", value: "turningOn")
+			sendEvent(name: "mode", value: "?")
 		}
    	}
     if (json.watts)
     {
-	    sendEvent(name: "energy", value: json.watts/1000.0)
+	    sendEvent(name: "power", value:  Math.round (json.watts*10)/10 )
    	}
     if (json.alltime)
     {
