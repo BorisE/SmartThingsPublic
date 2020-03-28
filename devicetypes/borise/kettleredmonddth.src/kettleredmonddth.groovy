@@ -1,4 +1,3 @@
-
 /**
  *  Kettle_temp
  *
@@ -133,8 +132,9 @@ def off() {
 def refresh() {
 	log.debug "Refresh method call"
 	
+    update_data()
+    
     //installed()
-    updated()
     //get_data()
 
 	/*
@@ -153,10 +153,16 @@ def refresh() {
 def updated(){
 	log.debug "Updated method call"
 
-	log.info("Hub address: " + device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP"))
-    log.info("Device IP ${DeviceIP}:${DevicePort}")
+	log.trace("Hub address: " + device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP"))
+    log.trace("Device IP ${DeviceIP}:${DevicePort}")
+    
+    update_data()
+}
+
+def update_data(){
 
 	runCmd("update")
+
 }
 
 
@@ -179,7 +185,7 @@ def runCmd(String varCommand) {
 	def hosthex = convertIPtoHex(host).toUpperCase()
 	def porthex = convertPortToHex(DevicePort).toUpperCase()
 	device.deviceNetworkId = "$hosthex:$porthex"
-	log.debug "The device id configured is: $device.deviceNetworkId"
+	log.trace "The device id configured is: $device.deviceNetworkId"
 	
 	//def userpassascii = "${HTTPUser}:${HTTPPassword}"
 	//def userpass = "Basic " + userpassascii.encodeAsBase64().toString()
@@ -188,12 +194,12 @@ def runCmd(String varCommand) {
 	def path = "/index.php?cmd="+cmdPath+sid
 	log.debug "path is: $path"
 	def body = ""//varCommand
-	log.debug "body is: $body"
+	log.trace "body is: $body"
 
 	def headers = [:]
 	headers.put("HOST", "$host:$DevicePort")
 	headers.put("Content-Type", "application/x-www-form-urlencoded")
-	log.debug "The Header is $headers"
+	log.trace "The Header is $headers"
 	def method = "GET"
 
 	try {
@@ -204,11 +210,11 @@ def runCmd(String varCommand) {
 			headers: headers
 			)
 		hubAction.options = [outputMsgToS3:false]
-		//log.debug hubAction
+		log.trace hubAction
 		hubAction
 	}
 	catch (Exception e) {
-		log.debug "Hit Exception $e on $hubAction"
+		log.error "Hit Exception $e on $hubAction"
 	}
 }
 
@@ -246,13 +252,13 @@ def parse(String description) {
 	//log.debug "AfterParsingEventMessage '${parsedEvent}'"
 
     def headerString = new String(parsedEvent.headers.decodeBase64())
-    log.debug "Response header '${headerString}'"
+    log.trace "Response header '${headerString}'"
     
     def bodyString = new String(parsedEvent.body.decodeBase64())
-    log.debug "Response body '${bodyString}'"
+    log.trace "Response body '${bodyString}'"
     
     def json = new groovy.json.JsonSlurper().parseText( bodyString)
-	log.trace json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
+	log.info json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
     
     
     if (json.status) //#may be '00' - OFF or '02' - ON
@@ -283,7 +289,7 @@ def parse(String description) {
    	}
     if (json.watts)
     {
-	    sendEvent(name: "power", value:  Math.round (json.watts*10)/10 )
+	    sendEvent(name: "power", value:  Math.round (json.watts/1000*10)/10 )
    	}
     if (json.alltime)
     {
