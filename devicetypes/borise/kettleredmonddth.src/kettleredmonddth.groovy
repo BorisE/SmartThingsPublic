@@ -26,9 +26,6 @@
  * 2) Периодический рефреш вообще
  * 3) Промежуточный статус switch
  *
- * 1.04 [29.03.2020]
- * - refresh flooding prevention
- * - проверка на пустую строку body response (parse messages)
  */
 metadata {
 	definition (name: "KettleRedmondDTH", namespace: "BorisE", author: "Boris Emchenko") {
@@ -36,18 +33,18 @@ metadata {
         capability "Temperature Measurement"	//temperature
         capability "Power Meter"				//power
         capability "Refresh"					//refresh()
-	
+
         attribute "version", "string"
-        attribute "refreshTriggeredAt", "number"
+        attribute "refreshTriggeredAt", "string"
         attribute "mode", "string"
         attribute "duration", "number"
         attribute "times", "number"
-	}
+    }
 
 	preferences {
 		input("DeviceIP", "string", title:"Device IP Address", description: "Please enter your device's IP Address", required: true, displayDuringSetup: true)
 		input("DevicePort", "string", title:"Device Port", description: "Please enter port 80 or your device's Port", required: true, displayDuringSetup: true)
-		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 1.04", description: "By Boris Emchenko"
+		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 1.01", description: "By Boris Emchenko"
     }
     
 	simulator {
@@ -102,7 +99,7 @@ metadata {
 }
 
 def installed() {
-	log.info "installing..."
+	log.info  "installed() method call"
 
 	//set defaule values
 	sendEvent(name: "switch", value: "off")
@@ -111,7 +108,6 @@ def installed() {
     sendEvent(name: "power", value: 0)
     sendEvent(name: "duration", value: 0)
     sendEvent(name: "times", value: 0)
-    sendEvent(name: "version", value: "1.04 2020-03-29")
 }
 
 
@@ -121,6 +117,9 @@ def on() {
 	sendEvent(name: "switch", value: "turningOn")
     
     runCmd("on")
+    //sendEvent(name: "temperature", value: 95)
+    //sendEvent(name: "power", value: 2001)
+	//sendEvent(name: "switch", value: "on")
 }
 
 def off() {
@@ -129,64 +128,52 @@ def off() {
     sendEvent(name: "switch", value: "turningOff")
  
  	runCmd("off")
+    //sendEvent(name: "temperature", value: 31)
+    //sendEvent(name: "power", value: 1001)
+	//sendEvent(name: "switch", value: "off")
 }
 
 def refresh() {
 	log.info "Refresh() method call"
 	
-    //update_data()
+    update_data()
     
+    //installed()
+    //get_data()
 
-	// Only allow refresh every 10 sec to prevent flooding the Zwave network
+	/*
+	// Only allow refresh every 2 minutes to prevent flooding the Zwave network
 	def timeNow = now()
-	if (!state.refreshTriggeredAt || (10 * 1000 < (timeNow - state.refreshTriggeredAt))) {
+	if (!state.refreshTriggeredAt || (2 * 60 * 1000 < (timeNow - state.refreshTriggeredAt))) {
 		state.refreshTriggeredAt = timeNow
+		// refresh will request battery, prevent multiple request by setting lastbatt now
+		state.lastbatt = timeNow
 		// use runIn with overwrite to prevent multiple DTH instances run before state.refreshTriggeredAt has been saved
-		runIn(2, "update_data", [overwrite: true])
+		runIn(2, "pollDevice", [overwrite: true])
 	}
-    else
-    {
-    	log.debug ("Skipping Refresh() to prevent flooding")
-    }
+    */
 }
 
-
-/**
- *  updated()
- *
- *  Runs when the user hits "Done" from Settings page.
- *
- *  Note: Weirdly, update() seems to be called twice. So execution is aborted if there was a previous execution
- *  within two seconds. See: https://community.smartthings.com/t/updated-being-called-twice/62912
- **/
 def updated(){
-	log.info "Updated() method call:"
+	log.info "Updated() method call"
 
-	if (!state.updatedLastRanAt || now() >= state.updatedLastRanAt + 2000) {
-		state.updatedLastRanAt = now()
-
-		// do stuff...
-        log.trace("Hub address: " + device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP"))
-        log.trace("Device IP ${DeviceIP}:${DevicePort}")
-
-		runIn(2, "update_data", [overwrite: true])
-	}
-	else {
-		log.trace "updated(): Ran within last 2 seconds so aborting."
-	}
-
+	log.trace("Hub address: " + device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP"))
+    log.trace("Device IP ${DeviceIP}:${DevicePort}")
+    
+    update_data()
 }
 
-def private update_data(){
+def update_data(){
 
 	runCmd("update")
 
 }
 
 
-def runCmd(String varCommand) {
+private def runCmd(String varCommand) {
 	
     log.info("Running command [${varCommand}]")
+    
     def cmdPath = ""
 	if (varCommand == "update") {
     	cmdPath = "4"
@@ -197,27 +184,27 @@ def runCmd(String varCommand) {
     }
     def randNum = new Random().nextInt(65000) + 1
     def sid = "&sid=" + randNum
-    //log.trace (sid)
+    //log.info (sid)
 
 	def host = DeviceIP
 	def hosthex = convertIPtoHex(host).toUpperCase()
 	def porthex = convertPortToHex(DevicePort).toUpperCase()
 	device.deviceNetworkId = "$hosthex:$porthex"
-	log.trace "The device id configured is: $device.deviceNetworkId"
+	//log.trace "The device id configured to: $device.deviceNetworkId"
 	
 	//def userpassascii = "${HTTPUser}:${HTTPPassword}"
 	//def userpass = "Basic " + userpassascii.encodeAsBase64().toString()
 
 	//def path = DevicePath
 	def path = "/index.php?cmd="+cmdPath+sid
-	log.debug "path is: $path"
+	log.trace "path is: $path"
 	def body = ""//varCommand
-	log.trace "body is: $body"
+	log.trace "Body is: $body"
 
 	def headers = [:]
 	headers.put("HOST", "$host:$DevicePort")
 	headers.put("Content-Type", "application/x-www-form-urlencoded")
-	log.trace "The Header is $headers"
+	log.trace "Header is: $headers"
 	def method = "GET"
 
 	try {
@@ -228,8 +215,9 @@ def runCmd(String varCommand) {
 			headers: headers
 			)
 		hubAction.options = [outputMsgToS3:false]
-		log.trace hubAction
+		log.trace "hubAction is => $hubAction"
 		hubAction
+		//log.trace "hubAction was run"
 	}
 	catch (Exception e) {
 		log.error "Hit Exception $e on $hubAction"
@@ -264,27 +252,22 @@ private def parseEventMessage(String description) {
 
 // parse events into attributes
 def parse(String description) {
-	log.info "Parsing message: '${description}'"
+	log.debug "Parsing message: '${description}'"
     
     def parsedEvent= parseEventMessage( description)
 	//log.debug "AfterParsingEventMessage '${parsedEvent}'"
 
-    def headerString = new String(parsedEvent.headers?.decodeBase64())
+    def headerString = new String(parsedEvent.headers.decodeBase64())
     log.trace "Response header '${headerString}'"
     
-    if (parsedEvent?.body?.decodeBase64())
-    {
-    	def bodyString = new String(parsedEvent?.body?.decodeBase64())
-	    log.trace "Response body '${bodyString}'"
-	    def json = new groovy.json.JsonSlurper().parseText( bodyString)
-		log.info json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
-    }
-    else
-    {
-	    log.warn "Response body is empty"
-    }
+    def bodyString = new String(parsedEvent.body.decodeBase64())
+    log.trace "Response body '${bodyString}'"
     
-    if (json?.status) //#may be '00' - OFF or '02' - ON
+    def json = new groovy.json.JsonSlurper().parseText( bodyString)
+	log.info json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
+    
+    
+    if (json.status) //#may be '00' - OFF or '02' - ON
     {
 	    if (json.status == "00") {
 			sendEvent(name: "switch", value: "off")
@@ -294,11 +277,11 @@ def parse(String description) {
 			sendEvent(name: "switch", value: "turningOn")
 		}
    	}
-    if (json?.temp)
+    if (json.temp)
     {
 	    sendEvent(name: "temperature", value: json.temp)
    	}
-    if (json?.mode) //# '00' - boil, '01' - heat to temp, '03' - backlight
+    if (json.mode) //# '00' - boil, '01' - heat to temp, '03' - backlight
     {
 	    if (json.mode == "00") {
 			sendEvent(name: "mode", value: "boil")
@@ -310,19 +293,20 @@ def parse(String description) {
 			sendEvent(name: "mode", value: "?")
 		}
    	}
-    if (json?.watts)
+    if (json.watts)
     {
 	    sendEvent(name: "power", value:  Math.round (json.watts/1000*10)/10 )
    	}
-    if (json?.alltime)
+    if (json.alltime)
     {
 	    sendEvent(name: "duration", value: json.alltime)
    	}
-    if (json?.times)
+    if (json.times)
     {
 	    sendEvent(name: "times", value: json.times)
    	}
 }
+
 
 private String convertIPtoHex(ipAddress) {
 	String hex = ipAddress.tokenize( '.' ).collect {  String.format( '%02x', it.toInteger() ) }.join()
