@@ -35,16 +35,16 @@
  */
 metadata {
 	definition (name: "KettleRedmondDTH", namespace: "BorisE", author: "Boris Emchenko") {
-		capability "Switch"						//switch, on(), off()
+        capability "Switch"						//switch, on(), off()
         capability "Temperature Measurement"	//temperature
         capability "Power Meter"				//power
         capability "Refresh"					//refresh()
 
         attribute "version", "string"
-        //attribute "refreshTriggeredAt", "string"
         attribute "mode", "string"
-        attribute "duration", "number"
+        //attribute "duration", "number"
         attribute "times", "number"
+        //attribute "refreshtime", "string"
     }
 
 	preferences {
@@ -78,21 +78,24 @@ metadata {
 				[value: 96, color: "#bc2323"]
 			]
 		}
-		valueTile("mode", "device.mode", decoration: "flat", width: 2, height: 2) {
+		valueTile("refreshtime", "device.refreshtime", decoration: "flat", width: 2, height: 2) {
 			state "default", label:'${currentValue}'
 		}
-
        
 		standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
 			state "default", action:"refresh.refresh", icon:"https://raw.githubusercontent.com/BorisE/SmartThingsPublic/master/icons/refresh-icon%402x.png"
 		}
 
+		valueTile("mode", "device.mode", decoration: "flat", width: 2, height: 2) {
+			state "default", label:'${currentValue}'
+		}
+
 		valueTile("power", "device.power", decoration: "flat", width: 2, height: 2) {
 			state "default", label:'${currentValue} kWh'
 		}
-		valueTile("duration", "device.duration", decoration: "flat", width: 2, height: 2) {
+		/*valueTile("duration", "device.duration", decoration: "flat", width: 2, height: 2) {
 			state "default", label:'${currentValue} hours'
-		}
+		}*/
 		valueTile("times", "device.times", decoration: "flat", width: 2, height: 2) {
 			state "default", label:'${currentValue} times'
 		}
@@ -100,7 +103,7 @@ metadata {
   		// the "switch" tile will appear in the Things view
         main("switch")
         
-        details(["switch", "temperature", "mode", "refresh", "power", "duration", "times"])
+        details(["switch", "temperature", "refreshtime", "refresh","mode", "power", "times" ])
 	}
 }
 
@@ -114,6 +117,7 @@ def installed() {
     sendEvent(name: "power", value: 0)
     sendEvent(name: "duration", value: 0)
     sendEvent(name: "times", value: 0)
+    sendEvent(name: "refreshtime", value: "")
 }
 
 
@@ -168,7 +172,7 @@ def updated(){
 	*/
 	
     def timeNow = now()
-    log.trace (timeNow - state.updatedLastRanAt)
+    //log.trace (timeNow - state.updatedLastRanAt)
     
     if (!state.updatedLastRanAt || ( 3*1000 < (timeNow - state.updatedLastRanAt)))
     {
@@ -188,7 +192,10 @@ def updated(){
 	else {
 		log.trace "updated(): Ran within last 2 seconds so aborting."
 	}
+}
 
+def configure(){
+	log.info "***configure()*** method call"
 }
 
 private def update_data(){
@@ -288,13 +295,13 @@ def parse(String description) {
     def headerString = new String(parsedEvent.headers.decodeBase64())
     log.trace "Response header: '${headerString}'"
     
-    
+    def json
     if (parsedEvent?.body?.decodeBase64())
     {
     	def bodyString = new String(parsedEvent?.body?.decodeBase64())
 	    log.trace "Response body '${bodyString}'"
-	    def json = new groovy.json.JsonSlurper().parseText( bodyString)
-		log.info json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
+	    json = new groovy.json.JsonSlurper().parseText( bodyString)
+		log.debug (json) // {alltime=13.7, durat=7f, mode=00, now=2020-03-29 23:57:20, runtime=4.87, status=00, targettemp=100, temp=72, times=357, watts=30162}
     }
     else
     {
@@ -303,7 +310,8 @@ def parse(String description) {
     
     if (json?.status) //#may be '00' - OFF or '02' - ON
     {
-	    if (json.status == "00") {
+	    //log.trace "status: '${json.status}'"
+        if (json.status == "00") {
 			sendEvent(name: "switch", value: "off")
 		}else if(json.status == "02")	{
 			sendEvent(name: "switch", value: "on")
@@ -331,13 +339,19 @@ def parse(String description) {
     {
 	    sendEvent(name: "power", value:  Math.round (json.watts/1000*10)/10 )
    	}
+    /*
     if (json?.alltime)
     {
 	    sendEvent(name: "duration", value: json.alltime)
-   	}
+   	}*/
     if (json?.times)
     {
 	    sendEvent(name: "times", value: json.times)
+   	}
+    if (json?.now)
+    {
+	    sendEvent(name: "refreshtime", value: json.now)
+	    //sendEvent(name: "refreshtime", value: "'${json.now}' | '${state.refreshTriggeredAt}'")
    	}
 }
 
