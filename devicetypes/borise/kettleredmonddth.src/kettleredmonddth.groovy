@@ -26,6 +26,12 @@
  * 2) Периодический рефреш вообще
  * 3) Промежуточный статус switch
  *
+ * 1.05 [29.03.2020]
+ * - reworking 1.03 because of strange bug with 1.04
+ *
+ * 1.04 [29.03.2020]
+ * - refresh flooding prevention
+ * - проверка на пустую строку body response (parse messages)
  */
 metadata {
 	definition (name: "KettleRedmondDTH", namespace: "BorisE", author: "Boris Emchenko") {
@@ -35,7 +41,7 @@ metadata {
         capability "Refresh"					//refresh()
 
         attribute "version", "string"
-        attribute "refreshTriggeredAt", "string"
+        //attribute "refreshTriggeredAt", "string"
         attribute "mode", "string"
         attribute "duration", "number"
         attribute "times", "number"
@@ -44,7 +50,7 @@ metadata {
 	preferences {
 		input("DeviceIP", "string", title:"Device IP Address", description: "Please enter your device's IP Address", required: true, displayDuringSetup: true)
 		input("DevicePort", "string", title:"Device Port", description: "Please enter port 80 or your device's Port", required: true, displayDuringSetup: true)
-		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 1.01", description: "By Boris Emchenko"
+		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 1.05", description: "By Boris Emchenko"
     }
     
 	simulator {
@@ -99,7 +105,7 @@ metadata {
 }
 
 def installed() {
-	log.info  "installed() method call"
+	log.info  "***installed()*** command call"
 
 	//set defaule values
 	sendEvent(name: "switch", value: "off")
@@ -112,7 +118,7 @@ def installed() {
 
 
 def on() {
-	log.info "on()"
+	log.info "***on()*** command call"
     
 	sendEvent(name: "switch", value: "turningOn")
     
@@ -123,7 +129,7 @@ def on() {
 }
 
 def off() {
-	log.info "off()"
+	log.info "***off()*** command call"
  	
     sendEvent(name: "switch", value: "turningOff")
  
@@ -134,36 +140,58 @@ def off() {
 }
 
 def refresh() {
-	log.info "Refresh() method call"
+	log.info "***Refresh()*** method call"
 	
-    update_data()
+    //update_data()
     
-    //installed()
-    //get_data()
-
-	/*
-	// Only allow refresh every 2 minutes to prevent flooding the Zwave network
+	// Only allow refresh every 10 seconds  to prevent flooding the network
 	def timeNow = now()
-	if (!state.refreshTriggeredAt || (2 * 60 * 1000 < (timeNow - state.refreshTriggeredAt))) {
+	if (!state.refreshTriggeredAt || (10 * 1000 < (timeNow - state.refreshTriggeredAt))) {
 		state.refreshTriggeredAt = timeNow
-		// refresh will request battery, prevent multiple request by setting lastbatt now
-		state.lastbatt = timeNow
 		// use runIn with overwrite to prevent multiple DTH instances run before state.refreshTriggeredAt has been saved
-		runIn(2, "pollDevice", [overwrite: true])
+		//runIn(2, "update_data", [overwrite: true])
+        update_data()
 	}
-    */
+    else
+    {
+    	log.debug ("Skipping refresh due to flooding prevention")
+    }
 }
 
 def updated(){
-	log.info "Updated() method call"
-
+	log.info "***Updated()*** method call"
+	/*
 	log.trace("Hub address: " + device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP"))
     log.trace("Device IP ${DeviceIP}:${DevicePort}")
     
     update_data()
+	*/
+	
+    def timeNow = now()
+    log.trace (timeNow - state.updatedLastRanAt)
+    
+    if (!state.updatedLastRanAt || ( 3*1000 < (timeNow - state.updatedLastRanAt)))
+    {
+		state.updatedLastRanAt = timeNow
+
+        log.trace("Hub address: " + device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP"))
+        log.trace("Device IP ${DeviceIP}:${DevicePort}")
+		
+		def hosthex = convertIPtoHex(DeviceIP).toUpperCase()
+		def porthex = convertPortToHex(DevicePort).toUpperCase()
+        device.deviceNetworkId = "$hosthex:$porthex"
+		log.trace "The device [$DeviceIP:$DevicePort] id configured to: $device.deviceNetworkId"
+
+		//runIn(2, "update_data", [overwrite: true])
+        update_data()
+	}
+	else {
+		log.trace "updated(): Ran within last 2 seconds so aborting."
+	}
+
 }
 
-def update_data(){
+private def update_data(){
 
 	runCmd("update")
 
@@ -186,36 +214,35 @@ private def runCmd(String varCommand) {
     def sid = "&sid=" + randNum
     //log.info (sid)
 
-	def host = DeviceIP
-	def hosthex = convertIPtoHex(host).toUpperCase()
+	def hosthex = convertIPtoHex(DeviceIP).toUpperCase()
 	def porthex = convertPortToHex(DevicePort).toUpperCase()
 	device.deviceNetworkId = "$hosthex:$porthex"
-	//log.trace "The device id configured to: $device.deviceNetworkId"
+	//log.trace "The device [$DeviceIP:$DevicePort] id configured to: $device.deviceNetworkId"
 	
 	//def userpassascii = "${HTTPUser}:${HTTPPassword}"
 	//def userpass = "Basic " + userpassascii.encodeAsBase64().toString()
 
-	//def path = DevicePath
-	def path = "/index.php?cmd="+cmdPath+sid
-	log.trace "path is: $path"
-	def body = ""//varCommand
-	log.trace "Body is: $body"
-
 	def headers = [:]
-	headers.put("HOST", "$host:$DevicePort")
+	headers.put("HOST", "$DeviceIP:$DevicePort")
 	headers.put("Content-Type", "application/x-www-form-urlencoded")
-	log.trace "Header is: $headers"
+	log.trace "Query header: $headers"
 	def method = "GET"
+
+	def path = "/index.php?cmd="+cmdPath+sid
+	log.trace "Query path: $DeviceIP:$DevicePort$path"
+	def body = ""		
+	log.trace "Query body: $body"
+
 
 	try {
 		def hubAction = new physicalgraph.device.HubAction(
-			method: method,
+			[method: method,
 			path: path,
 			body: body,
-			headers: headers
-			)
+			headers: headers],
+			device.deviceNetworkId)
 		hubAction.options = [outputMsgToS3:false]
-		log.trace "hubAction is => $hubAction"
+		//log.trace "hubAction is => $hubAction"
 		hubAction
 		//log.trace "hubAction was run"
 	}
@@ -252,22 +279,29 @@ private def parseEventMessage(String description) {
 
 // parse events into attributes
 def parse(String description) {
-	log.debug "Parsing message: '${description}'"
+	
+    log.info "Parsing message: '${description}'"
     
     def parsedEvent= parseEventMessage( description)
 	//log.debug "AfterParsingEventMessage '${parsedEvent}'"
 
     def headerString = new String(parsedEvent.headers.decodeBase64())
-    log.trace "Response header '${headerString}'"
-    
-    def bodyString = new String(parsedEvent.body.decodeBase64())
-    log.trace "Response body '${bodyString}'"
-    
-    def json = new groovy.json.JsonSlurper().parseText( bodyString)
-	log.info json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
+    log.trace "Response header: '${headerString}'"
     
     
-    if (json.status) //#may be '00' - OFF or '02' - ON
+    if (parsedEvent?.body?.decodeBase64())
+    {
+    	def bodyString = new String(parsedEvent?.body?.decodeBase64())
+	    log.trace "Response body '${bodyString}'"
+	    def json = new groovy.json.JsonSlurper().parseText( bodyString)
+		log.info json //{alltime=11.1, durat=80, mode=00, status=00, targettemp=100, temp=25, times=279, watts=24528}
+    }
+    else
+    {
+	    log.warn "Response body is empty"
+    }
+    
+    if (json?.status) //#may be '00' - OFF or '02' - ON
     {
 	    if (json.status == "00") {
 			sendEvent(name: "switch", value: "off")
@@ -277,11 +311,11 @@ def parse(String description) {
 			sendEvent(name: "switch", value: "turningOn")
 		}
    	}
-    if (json.temp)
+    if (json?.temp)
     {
 	    sendEvent(name: "temperature", value: json.temp)
    	}
-    if (json.mode) //# '00' - boil, '01' - heat to temp, '03' - backlight
+    if (json?.mode) //# '00' - boil, '01' - heat to temp, '03' - backlight
     {
 	    if (json.mode == "00") {
 			sendEvent(name: "mode", value: "boil")
@@ -293,15 +327,15 @@ def parse(String description) {
 			sendEvent(name: "mode", value: "?")
 		}
    	}
-    if (json.watts)
+    if (json?.watts)
     {
 	    sendEvent(name: "power", value:  Math.round (json.watts/1000*10)/10 )
    	}
-    if (json.alltime)
+    if (json?.alltime)
     {
 	    sendEvent(name: "duration", value: json.alltime)
    	}
-    if (json.times)
+    if (json?.times)
     {
 	    sendEvent(name: "times", value: json.times)
    	}
