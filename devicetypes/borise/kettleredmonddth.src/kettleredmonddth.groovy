@@ -26,8 +26,13 @@
  * 2) Периодический рефреш вообще
  * 3) Промежуточный статус switch
  *
+ * 1.06 [04.04.2020]
+ * - обнаружен комбо режим работы чайника (boiling and warming)
+ * - выводится целевая температура в режиме warming
  * 1.05 [29.03.2020]
  * - reworking 1.03 because of strange bug with 1.04
+ * - добавлено отображение времени обновления данных
+ * - изменен порядок плиток
  *
  * 1.04 [29.03.2020]
  * - refresh flooding prevention
@@ -39,18 +44,19 @@ metadata {
         capability "Temperature Measurement"	//temperature
         capability "Power Meter"				//power
         capability "Refresh"					//refresh()
+        capability "Polling"					//refresh()
 
         attribute "version", "string"
         attribute "mode", "string"
         //attribute "duration", "number"
         attribute "times", "number"
-        //attribute "refreshtime", "string"
+        attribute "refreshtime", "string"
     }
 
 	preferences {
 		input("DeviceIP", "string", title:"Device IP Address", description: "Please enter your device's IP Address", required: true, displayDuringSetup: true)
 		input("DevicePort", "string", title:"Device Port", description: "Please enter port 80 or your device's Port", required: true, displayDuringSetup: true)
-		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettler 1.05", description: "By Boris Emchenko"
+		input name: "about", type: "paragraph", element: "paragraph", title: "Redmond Kettle 1.06", description: "By Boris Emchenko"
     }
     
 	simulator {
@@ -69,7 +75,7 @@ metadata {
         valueTile("temperature", "device.temperature", inactiveLabel: false, width: 2, height: 2) {
 			state "temperature", label:'${currentValue}°',
 			backgroundColors:[
-				[value: 31, color: "#153591"],
+				[value: 35, color: "#153591"],
 				[value: 44, color: "#1e9cbb"],
 				[value: 59, color: "#90d2a7"],
 				[value: 74, color: "#44b621"],
@@ -110,12 +116,12 @@ metadata {
 def installed() {
 	log.info  "***installed()*** command call"
 
-	//set defaule values
+	//set default values
 	sendEvent(name: "switch", value: "off")
     sendEvent(name: "temperature", value: 0)
 	sendEvent(name: "mode", value: "none")
     sendEvent(name: "power", value: 0)
-    sendEvent(name: "duration", value: 0)
+    //sendEvent(name: "duration", value: 0)
     sendEvent(name: "times", value: 0)
     sendEvent(name: "refreshtime", value: "")
 }
@@ -127,9 +133,6 @@ def on() {
 	sendEvent(name: "switch", value: "turningOn")
     
     runCmd("on")
-    //sendEvent(name: "temperature", value: 95)
-    //sendEvent(name: "power", value: 2001)
-	//sendEvent(name: "switch", value: "on")
 }
 
 def off() {
@@ -138,9 +141,6 @@ def off() {
     sendEvent(name: "switch", value: "turningOff")
  
  	runCmd("off")
-    //sendEvent(name: "temperature", value: 31)
-    //sendEvent(name: "power", value: 1001)
-	//sendEvent(name: "switch", value: "off")
 }
 
 def refresh() {
@@ -328,11 +328,13 @@ def parse(String description) {
 	    if (json.mode == "00") {
 			sendEvent(name: "mode", value: "boil")
 		}else if(json.mode == "01")	{
-			sendEvent(name: "mode", value: "heat")
+            sendEvent(name: "mode", value: "keep at "+json?.targettemp+"°")
+		}else if(json.mode == "02")	{
+			sendEvent(name: "mode", value: "boil&keep at "+json?.targettemp+"°") //обнаружил эмпирически - можно установить через приложение и комбо режим
 		}else if(json.mode == "03")	{
 			sendEvent(name: "mode", value: "backlight")
 		}else{
-			sendEvent(name: "mode", value: "?")
+			sendEvent(name: "mode", value: "? ("+json.mode+")")
 		}
    	}
     if (json?.watts)
